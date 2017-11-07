@@ -1,0 +1,217 @@
+---
+title: "Practical Machine Learning: Course Project"
+author: "Garvish Raval"
+date: "Nov 7, 2017"
+output: html_document
+---
+
+---
+
+# Executive Summary
+
+Human Activity Recognition (HAR) is a key research area that is gaining increasing attention, especially for the development of context-aware systems. There are many potential applications for HAR, like: elderly monitoring, life log systems for monitoring energy expenditure and for supporting weight-loss programs, and digital assistants for weight lifting exercises. Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively.
+
+Six participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+This report will describe how the data captured are used to identify the parameters involved in predicting the movement involved based on the above classification, and then to predict the movement for 20 test cases.
+
+The training data were divided into two groups, a training data and a validation data (to be used to validate the data), to derived the prediction model by using the training data, to validate the model where an expected out-of-sample error rate of less than 0.5%, or 99.5% accuracy, would be acceptable before it is used to perform the prediction on the 20 test cases - that must have 100% accuracy (to obtain 20 points awarded).
+
+The training model developed using Random Forest was able to achieve over 99.99% accuracy, or less than 0.03% out-of-sample error, and was able to predict the 20 test cases with 100% accuracy.
+
+---
+
+# Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+```{r}
+setwd("D:\\Projects\\DataScience\\Coursera Certification\\Data Science Specialization\\Assignments\\PracticalML_PeerAssessment1")
+
+library(knitr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(corrplot)
+set.seed(12345)
+```
+
+```{r}
+trainingDf <- read.csv("data/pml-training.csv", na.strings = c("NA","#DIV/0!",""))
+testingDf <- read.csv("data/pml-testing.csv", na.strings = c("NA","#DIV/0!",""))
+```
+
+---
+
+# (Clean and) Remove invalid predictors
+
+Reduce the number of predictors by removing columns that have near zero values, NA, or is empty.
+
+```{r}
+# remove Near Zero Variance variables from `train` data and `test` data
+NZV <- nearZeroVar(trainingDf)
+trainingDf <- trainingDf[, -NZV]
+testingDf  <- testingDf[, -NZV]
+
+# remove columns that contain NA's
+AllNA    <- sapply(trainingDf, function(x) mean(is.na(x))) > 0.95
+trainingDf <- trainingDf[, AllNA==FALSE]
+testingDf  <- testingDf[, AllNA==FALSE]
+
+# remove identification only variables (columns 1 to 5)
+trainingDf <- trainingDf[, -(1:5)]
+testingDf  <- testingDf[, -(1:5)]
+```
+
+---
+
+# Separate the data to be used for Cross Validation
+
+Using the training data, separate out a set to be used for validation. From what I've read (http://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm#overview), there is no need to create a separate set for validation given the Random Forests algorithm is a classifier based on primarily two methods - bagging and random subspace method. And the datasets used are created using bootstrapping (resampling with replacement), and internally performs cross-validation to refine the model. The out-of-bag error estimate defines the estimation errors in the internal generated validation sets.
+
+However, as it is one of the project evaluation criteria, there is no harm to create a cross validation dataset to compare the model created by the training subset.
+
+```{r}
+# Divide the training data into a training set and a validation set
+inTrain <- createDataPartition(trainingDf$classe, p = 0.6, list = FALSE)
+trainingSet <- trainingDf[inTrain,]
+validationSet <- trainingDf[-inTrain,]
+
+testSet <- testingDf
+
+dim(trainingSet);
+dim(validationSet);
+dim(testSet);
+```
+
+---
+
+# Machine Learning Models
+
+---
+
+### Model 1: Decision Tree
+
+```{r}
+set.seed(12345)
+
+# Check if model file exists
+modelDTFile <- "model/modelDT.RData"
+if (!file.exists(modelDTFile)) {
+
+    modelDT <- rpart(classe ~ ., data=trainingSet, method="class")
+    save(modelDT, file = modelDTFile)
+} else {
+    # Good model exists from previous run, load it and use it.  
+    load(file = modelDTFile, verbose = TRUE)
+}
+
+
+predDT <- predict(modelDT, validationSet, type = "class")
+confDT <- confusionMatrix(predDT, validationSet$classe)
+```
+---
+
+### Model 2: Random forest
+
+```{r}
+set.seed(12345)
+
+# Check if model file exists
+modelRFFile <- "model/modelRF.RData"
+if (!file.exists(modelRFFile)) {
+  controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+  modelRF <- train(classe ~ ., data=trainingSet, method="rf", trControl=controlRF)
+  save(modelRF, file = modelRFFile)
+} else {
+  # Good model exists from previous run, load it and use it.  
+  load(file = modelRFFile, verbose = TRUE)
+}
+
+predRF <- predict(modelRF, validationSet)
+confRF <- confusionMatrix(predRF, validationSet$classe)
+```
+---
+
+### Model 3: Generalized Boosted Model
+
+```{r}
+set.seed(12345)
+
+# Check if model file exists
+modelGBMFile <- "model/modelGBM.RData"
+if (!file.exists(modelGBMFile)) {
+  controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+  modelGBM  <- train(classe ~ ., data=trainingSet, method = "gbm", trControl = controlGBM, verbose = FALSE)
+  save(modelGBM, file = modelGBMFile)
+} else {
+  # Good model exists from previous run, load it and use it.  
+  load(file = modelGBMFile, verbose = TRUE)
+}
+
+predGBM <- predict(modelGBM, newdata=validationSet)
+confGBM <- confusionMatrix(predGBM, validationSet$classe)
+```
+
+---
+
+### Measuring Accouracy & Ploting Confussion Matrix
+
+The accuracy of the 3 regression modeling methods above are:
+
+1. Decision Tree : ``r round(confDT$overall['Accuracy'], 4) ``
+2. Random Forest : ``r round(confRF$overall['Accuracy'], 4) ``
+3. Generalized Boosted Model : ``r round(confGBM$overall['Accuracy'], 4) ``
+
+```{r}
+# plot matrix results
+plot(confDT$table, col = confDT$byClass, 
+     main = paste("Decision Tree - Accuracy =",
+                  round(confDT$overall['Accuracy'], 4)))
+```
+
+```{r}
+# plot matrix results
+plot(confRF$table, col = confRF$byClass, 
+     main = paste("Random Forest - Accuracy =",
+                  round(confRF$overall['Accuracy'], 4)))
+```
+
+```{r}
+# plot matrix results
+plot(confGBM$table, col = confGBM$byClass, 
+     main = paste("Generalized Boosted Model - Accuracy =",
+                  round(confGBM$overall['Accuracy'], 4)))
+```
+
+---
+
+# Random Forest Model is having maximum Accuracy ``r round(confRF$overall['Accuracy'], 4) ``. We will use Random Forst Model for Final Test Set.
+
+---
+
+# Applying the Selected Model to the Test Data
+
+
+In that case, the Random Forest model will be applied to predict the 20 quiz results (testing dataset) as shown below.
+
+```{r}
+predictTEST <- predict(modelRF, newdata=testSet)
+predictTEST
+```
+
+---
+
+# Conclusion
+The model predicted the 20 test cases with 100% accuracy. All 20 points were awarded after submitting the 20 test files.
